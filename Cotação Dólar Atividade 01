@@ -1,0 +1,72 @@
+import datetime
+import requests
+
+
+def cotar():
+    hoje = datetime.date.today()
+    inicio = hoje - datetime.timedelta(days=364)
+
+    # Buscamos alguns dias extras para encontrar
+    # uma cotação anterior ao início do período.
+    data_inicial = (inicio - datetime.timedelta(days=7)).strftime(
+        "%m-%d-%Y"
+    )
+    data_final = hoje.strftime("%m-%d-%Y")
+
+    url = (
+        "https://olinda.bcb.gov.br/olinda/servico/PTAX/"
+        "versao/v1/odata/CotacaoDolarPeriodo"
+        "(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
+    )
+
+    parametros = {
+        "@dataInicial": f"'{data_inicial}'",
+        "@dataFinalCotacao": f"'{data_final}'",
+        "$format": "json",
+        "$select": "dataHoraCotacao,cotacaoCompra",
+        "$top": "1000"
+    }
+
+    resposta = requests.get(url, params=parametros, timeout=30)
+    resposta.raise_for_status()
+    dados = resposta.json()["value"]
+
+    if not dados:
+        raise ValueError("A API não retornou cotações.")
+
+    cotacoes_por_data = {}
+
+    for item in sorted(dados, key=lambda x: x["dataHoraCotacao"]):
+        data = datetime.datetime.strptime(
+            item["dataHoraCotacao"][:10], "%Y-%m-%d"
+        ).date()
+
+        cotacoes_por_data[data] = item["cotacaoCompra"]
+
+    cotacoes = []
+    ultima_cotacao = None
+
+    for i in range(365):
+        dia = inicio + datetime.timedelta(days=i)
+
+        if dia in cotacoes_por_data:
+            ultima_cotacao = cotacoes_por_data[dia]
+
+        if ultima_cotacao is None:
+            anteriores = [
+                data for data in cotacoes_por_data if data < dia
+            ]
+
+            if anteriores:
+                ultima_cotacao = cotacoes_por_data[max(anteriores)]
+            else:
+                raise ValueError(
+                    "Não foi encontrada cotação anterior para preencher "
+                    "o início do período."
+                )
+
+        cotacoes.append(round(ultima_cotacao, 2))
+
+    return cotacoes
+
+print(cotar())
